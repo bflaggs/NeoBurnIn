@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Last Change: Mon Jan 20, 2020 at 04:50 AM -0500
+# Last Change: Fri Feb 07, 2020 at 01:07 PM +0800
 
 import logging
 
@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 
 
 class ThermDataSource(ThermSensor, BaseDataSource):
-    def __init__(self, stop_event, queue, *args, sensorPath=None, **kwargs):
-        super().__init__(stop_event, queue, *args,
-                         sensor=Path(sensorPath), **kwargs)
+    def __init__(self, stop_event, queue, *args, sensorPath=list(), **kwargs):
+        sensor = [Path(p) for p in sensorPath]
+        super().__init__(stop_event, queue, *args, sensor=sensor, **kwargs)
 
     def run(self):
         while not self.stop_event.wait(self.interval):

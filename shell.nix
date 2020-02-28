@@ -16,6 +16,7 @@ pkgs.mkShell {
     aiohttp-cors
     janus
     pyyaml
+    pysnmp
 
     RPi_GPIO
     rainbow_logging_handler

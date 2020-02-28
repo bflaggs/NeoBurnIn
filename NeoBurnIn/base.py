@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Last Change: Sun Jan 19, 2020 at 07:51 PM -0500
+# Last Change: Fri Feb 07, 2020 at 02:13 PM +0800
 
 import abc
 import sys
@@ -77,25 +77,27 @@ class DataStream(list):
                  max_length=5, **kwargs):
         self.max_length = max_length
         self.json_str = ''
+        self.list_is_full = False
 
         super().__init__(*args, **kwargs)
 
     def append(self, item):
         # Append unconditionally.
         super().append(item)
-        list_is_full = False
 
         # If the total length is strictly greater than designated upper limit,
         # pop the oldest item.
-        if len(self) > self.max_length:
+        if self.list_is_full:
             self.pop(0)
-            list_is_full = True
+        elif len(self) > self.max_length:
+            self.pop(0)
+            self.list_is_full = True
 
         # This ensures that the datastream length is at most equal to the
         # designated upper limit.
         self.json_str = ','.join(str(x) for x in self)
 
-        return list_is_full
+        return self.list_is_full
 
 
 class DataStats(DataStream):
@@ -122,11 +124,12 @@ class DataStats(DataStream):
         super().__init__(*args, **kwargs)
 
     def append(self, item):
+        # Compute statistics only if the list is full.
         if super().append(item):
             if self.defer_until_full_renewal:
-                return self.post_append_full_defer()
+                return self.post_append_full_defer()  # The reference is computed only once
             else:
-                return self.post_append_partial_defer()
+                return self.post_append_partial_defer()  # The reference is computed continuously
 
         else:
             return False
@@ -150,8 +153,7 @@ class DataStats(DataStream):
 
     def post_append_partial_defer(self):
         stats = self.compute_mean_and_std()
-        if not self.reference_exists:
-            self.store_reference(*stats)
+        self.store_reference(*stats)
         return stats
 
     def compute_mean_and_std(self):

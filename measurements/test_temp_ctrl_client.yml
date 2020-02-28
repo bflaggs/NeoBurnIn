@@ -10,13 +10,29 @@ client:
 
 sensors:
     - Therm.ThermDataSource:
-        sensorPath: /sys/bus/w1/devices/28-0000098d94eb/w1_slave
+        sensorPath:
+            - /sys/bus/w1/devices/28-0000098d94eb/w1_slave
         displayName: SHORT_WIRE
         interval: 5
     - Therm.ThermDataSource:
-        sensorPath: /sys/bus/w1/devices/28-0000098d8197/w1_slave
-        displayName: LONG_WIRE
+        sensorPath:
+            - /sys/bus/w1/devices/28-0000098d8197/w1_slave
+            - /sys/bus/w1/devices/28-0000098d94eb/w1_slave
+        displayName: COMBINED_WIRE
         interval: 5
+    - Current.CurrentMaratonDataSource:
+        ipAddr: 192.168.1.2
+        interval: 60
+        displayName: MARATON_CURR
+        psuChannels:
+            - 1
+            - 2
+    #- Alarm.FireAlarmDataSource:
+        #ch: 8
+        #displayName: FIRE
+    #- Alarm.WaterAlarmDataSource:
+        #ch: 9
+        #displayName: WATER
 
 controllers:
     relay1:
@@ -25,6 +41,11 @@ controllers:
             port: 45679
             automaticDiscovery: true
             relayIdx: 0
+    relay2:
+        PowerSupply.PowerSupplySink:
+            host: localhost
+            port: 45679
+            psuIp: 192.168.1.2
 
 ctrlRules:
     - match:

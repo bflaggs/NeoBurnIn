@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Last Change: Mon Jan 20, 2020 at 05:11 AM -0500
+# Last Change: Fri Feb 28, 2020 at 02:33 PM +0800
 
 import logging
 import datetime as dt
@@ -8,8 +8,11 @@ import aiohttp_cors
 
 from aiohttp import web
 from collections import defaultdict
+from datetime import datetime
 
 from rpi.burnin.USBRelay import set_relay_state, ON, OFF
+from rpi.burnin.USBRelay import get_all_device_paths
+from labSNMP.wrapper.Wiener_async import WienerControl
 
 from NeoBurnIn.base import BaseServer
 from NeoBurnIn.base import DataStream, DataStats
@@ -117,12 +120,32 @@ class DataServer(GroundServer):
                 # Log the whole entry
                 logger.info('Received: {}'.format(entry))
 
-                # First store the data.
+                # Now check if this data point is OK.
+                if self.stash[ch_name]['data'].reference_exists:
+                    mean = self.stash[ch_name]['data'].reference_mean
+                    envelop = self.stash[ch_name]['data'].reference_stdev * \
+                        self.stdevRange
+                    if value <= mean-envelop or value >= mean+envelop:
+                        logger.critical('Channel {} measured a value of {}, which is outside of {} stds.'.format(
+                            ch_name, value, self.stdevRange
+                        ))
+
+                # Store the data first.
                 results = self.stash[ch_name]['data'].append(value)
                 if results is not False:
                     self.stash[ch_name]['summary'].append(results[0])
 
-                # Store the time, unconditionally.
+                # Now check if this data point is OK.
+                if self.stash[ch_name]['data'].reference_exists:
+                    mean = self.stash[ch_name]['data'].reference_mean
+                    envelop = self.stash[ch_name]['data'].reference_stdev * \
+                        self.stdevRange
+                    if value <= mean-envelop or value >= mean+envelop:
+                        logger.critical('Channel {} measured a value of {}, which is outside of {} stds.'.format(
+                            ch_name, value, self.stdevRange
+                        ))
+
+                # Store the time unconditionally.
                 self.stash[ch_name]['time'].append(
                     self.convert_to_bokeh_time(date))
 
@@ -171,7 +194,6 @@ class DataServer(GroundServer):
         specified empty leaves.
         '''
         stash = defaultdict(self.default_item)
-        stash['overall'] = DataStream(max_length=overall_stats_length)
         return stash
 
     @staticmethod
@@ -179,12 +201,19 @@ class DataServer(GroundServer):
         return {
             'summary': DataStream(max_length=item_length),
             'time': DataStream(max_length=item_length),
-            'data': DataStats(max_length=item_length)
+            'data': DataStats(max_length=item_length,
+                              defer_until_full_renewal=False)
         }
 
 
 class CtrlServer(GroundServer):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args,
+                 minTimeOut=60, **kwargs):
+        self.minTimeOut = minTimeOut
+        self.relay_timer = None
+        self.test_timer = None
+        self.psu_timer = None
+
         super().__init__(*args, **kwargs)
 
     ###############
@@ -198,7 +227,11 @@ class CtrlServer(GroundServer):
                 self.handler_relay_ctrl
             ),
             web.post(
-                '/psu/{dev_ip_addr}/{state}',
+                '/relay/list',
+                self.handler_relay_list
+            ),
+            web.post(
+                '/psu/{dev_ip_addr}/{ch_name}/{state}',
                 self.handler_psu_ctrl
             ),
             web.post(
@@ -213,12 +246,32 @@ class CtrlServer(GroundServer):
         raw_state = request.match_info['state']
         state = self.translate_relay_state(raw_state)
 
-        if state:
+        allowed_to_control = self.execute_if_not_too_recent(
+            'relay_timer', self.minTimeOut)
+
+        if not allowed_to_control:
+            logger.warning('Operation denied for changing relay state to {}'.format(
+                raw_state
+            ))
+            return web.Response(text='Operation denied: Previous operation too recent.')
+
+        elif state:
             try:
-                set_relay_state(dev_name, ch_name, state)
+                ret_code = set_relay_state(dev_name, ch_name, state)
                 logger.info('Turning {} USB relay channel {}'.format(
                     raw_state.lower(), ch_name))
-                return web.Response(text='Success')
+
+                # NOTE: The magic number 9 indicates when the relay control
+                # operation was successful.
+                if ret_code != 9:
+                    logger.critical('Relay control failed with error code: {}'.format(
+                        ret_code
+                    ))
+                    return web.Response(text='Failed with error code {}'.format(
+                        ret_code
+                    ))
+                else:
+                    return web.Response(text='Success')
 
             except Exception as err:
                 warning = 'Relay control error: {}'.format(
@@ -230,21 +283,73 @@ class CtrlServer(GroundServer):
         else:
             return web.Response(text='Invalid state: {}'.format(raw_state))
 
+    async def handler_relay_list(self, request):
+        devs = '\n'.join([p.decode('utf-8') for p in get_all_device_paths()])
+        return web.Response(text=devs)
+
     async def handler_psu_ctrl(self, request):
-        return web.Response(text='PSU control unimplemnted!')
+        dev_ip_addr = request.match_info['dev_ip_addr']
+        ch_name = request.match_info['ch_name']
+        state = request.match_info['state']
+
+        allowed_to_control = self.execute_if_not_too_recent(
+            'psu_timer', self.minTimeOut)
+
+        psu = WienerControl(dev_ip_addr)
+
+        if not allowed_to_control:
+            logger.warning('Operation denied for changing PSU channel {} to state {}'.format(
+                ch_name, state
+            ))
+            return web.Response(text='Operation denied: Previous operation too recent.')
+
+        elif state == 'on':
+            await psu.PowerOnCh(ch_name)
+
+        elif state == 'off':
+            await psu.PowerOffCh(ch_name)
+
+        else:
+            return web.Response(text='Unknown state: {}'.format(state))
+
+        return web.Response(text='Success')
 
     async def handler_test(self, request):
         ch_name = request.match_info['ch_name']
         state = request.match_info['state']
 
-        logger.info('Test command with channel: {} and state: {}'.format(
-            ch_name, state
-        ))
-        return web.Response(text='Success')
+        allowed_to_control = self.execute_if_not_too_recent(
+            'test_timer', self.minTimeOut
+        )
+
+        if not allowed_to_control:
+            logger.warning('Test command denied: Too frequent.')
+            return web.Response(text='Operation denied: Previous operation too recent.')
+
+        else:
+            logger.info('Test command with channel: {} and state: {}'.format(
+                ch_name, state
+            ))
+            return web.Response(text='Success')
 
     ###############################
     # Helpers for device controls #
     ###############################
+
+    def execute_if_not_too_recent(self, timer_name, timer_period):
+        cur_time = datetime.now()
+
+        prev_time = getattr(self, timer_name)
+        if prev_time:
+            if (cur_time-prev_time).total_seconds() >= timer_period:
+                setattr(self, timer_name, cur_time)
+                return True
+            else:
+                return False
+
+        else:
+            setattr(self, timer_name, cur_time)
+            return True
 
     @staticmethod
     def translate_relay_state(state):

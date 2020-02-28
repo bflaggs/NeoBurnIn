@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Last Change: Mon Jan 27, 2020 at 11:44 AM +0800
+# Last Change: Wed Feb 19, 2020 at 10:55 PM +0800
 
 import logging
 import asyncio
@@ -157,7 +157,7 @@ class CtrlClient(DataClient):
                     if match(data):
                         url = action(self.controllers)
                         await super().send(
-                            bytearray('Relay control', 'utf8'), url, False)
+                            bytearray('Remote control', 'utf8'), url, False)
 
                 # Always send non-alarm data
                 if data.value:

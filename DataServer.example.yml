@@ -1,12 +1,12 @@
 log:
     filename: measurements/DataServer.log
     backupCount: 1000
-    fromaddr: null@example.com
-    toaddrs:
-        - nil@example.com
-        - void@example.com
-    credentials: yourpassword
-    interval: 1 HRS
+    #fromaddr: null@example.com
+    #toaddrs:
+        #- nil@example.com
+        #- void@example.com
+    #credentials: yourpassword
+    #interval: 1 HRS
     maxSize: 100 MB
     when: D
     rotateInterval: 1
@@ -15,4 +15,4 @@ log:
 server:
     host: localhost
     port: 45678
-    stdevRange: 3
+    stdevRange: 1
