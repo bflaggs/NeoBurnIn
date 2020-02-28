@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class PowerSupplySink(BaseDataSink):
-    def __init__(self, host, port, psuIp, entry='psu'):
+    def __init__(self, host, port, psu_ip, entry='psu'):
         self.host = host
         self.port = port
         self.psuIp = psuIp
